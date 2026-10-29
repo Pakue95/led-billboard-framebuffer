@@ -48,6 +48,16 @@ python3 -c "from PIL import Image; open('/dev/shm/billboard.rgb','wb').write(Ima
 head -c 3072 /dev/zero > /dev/shm/billboard.rgb
 ```
 
+`demo.py` plays a set of animations (plasma, fire, rainbow, matrix, starfield,
+life, metaballs, ripples) on the panel, or renders them to a GIF with Pillow:
+
+```sh
+./demo.py                                # all animations, looping, on the panel
+./demo.py plasma fire --duration 10      # just these, 10 s each
+./demo.py --gif demo.gif --duration 4    # one pass to an LED-look GIF
+./demo.py --gif demo.gif --style pixel --scale 6 --fps 15   # smaller file
+```
+
 ## Building
 
 ```sh
