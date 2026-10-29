@@ -1,0 +1,12 @@
+[Unit]
+Description=iDotMatrix LED panel framebuffer
+After=bluetooth.service
+Requires=bluetooth.service
+
+[Service]
+ExecStart=/usr/local/bin/billboard run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

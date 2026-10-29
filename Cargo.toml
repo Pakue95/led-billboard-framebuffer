@@ -1,0 +1,14 @@
+[package]
+name = "billboard"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.104"
+btleplug = "0.13.5"
+clap = { version = "4.6.7", features = ["derive"] }
+dbus = { version = "0.9.12", features = ["vendored"] }
+futures = "0.3.34"
+png = "0.18.1"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "time", "signal", "fs"] }
+uuid = "1.29.0"
