@@ -111,17 +111,21 @@ async fn scan(seconds: u64) -> Result<()> {
     Ok(())
 }
 
+/// Whether `p` is the requested panel (or any panel, without an address).
+async fn is_target(p: &Peripheral, address: Option<&str>) -> bool {
+    match address {
+        Some(a) => p.address().to_string().eq_ignore_ascii_case(a),
+        None => panel_name(p).await.is_some(),
+    }
+}
+
 /// Scan until the requested panel (or any panel) shows up.
 async fn find_panel(central: &Adapter, address: Option<&str>) -> Result<Peripheral> {
     central.start_scan(ScanFilter::default()).await?;
     let found = async {
         loop {
             for p in central.peripherals().await? {
-                let matches = match address {
-                    Some(a) => p.address().to_string().eq_ignore_ascii_case(a),
-                    None => panel_name(&p).await.is_some(),
-                };
-                if matches {
+                if is_target(&p, address).await {
                     return Ok::<_, anyhow::Error>(p);
                 }
             }
@@ -243,6 +247,32 @@ fn create_framebuffer(path: &Path, len: usize) -> Result<()> {
     Ok(())
 }
 
+/// Wait for SIGINT or SIGTERM and return its name.
+async fn shutdown_signal() -> Result<&'static str> {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut int = signal(SignalKind::interrupt())?;
+    let mut term = signal(SignalKind::terminate())?;
+    Ok(tokio::select! {
+        _ = int.recv() => "SIGINT",
+        _ = term.recv() => "SIGTERM",
+    })
+}
+
+/// Drop our connection to the panel. BlueZ keeps a link open after its
+/// D-Bus client exits, and a connected panel stops advertising, so other
+/// hosts could not find it again until it was power-cycled.
+async fn disconnect(central: &Adapter, address: Option<&str>) {
+    central.stop_scan().await.ok();
+    for p in central.peripherals().await.unwrap_or_default() {
+        if p.is_connected().await.unwrap_or(false) && is_target(&p, address).await {
+            match p.disconnect().await {
+                Ok(()) => eprintln!("disconnected from {}", p.address()),
+                Err(e) => eprintln!("error disconnecting from {}: {e}", p.address()),
+            }
+        }
+    }
+}
+
 async fn run(args: RunArgs) -> Result<()> {
     if !(args.fps > 0.0) {
         bail!("--fps must be positive");
@@ -250,11 +280,23 @@ async fn run(args: RunArgs) -> Result<()> {
     let len = (args.size * args.size * 3) as usize;
     create_framebuffer(&args.framebuffer, len)?;
     let central = adapter().await?;
+    let result = tokio::select! {
+        result = serve(&central, &args, len) => result,
+        signal = shutdown_signal() => signal.map(|s| eprintln!("received {s}")),
+    };
+    if timeout(Duration::from_secs(5), disconnect(&central, args.address.as_deref())).await.is_err() {
+        eprintln!("timed out disconnecting");
+    }
+    result
+}
+
+/// Connect to the panel and mirror the framebuffer, reconnecting forever.
+async fn serve(central: &Adapter, args: &RunArgs, len: usize) -> Result<()> {
     let frame_time = Duration::from_secs_f64(1.0 / args.fps);
 
     loop {
         let result: Result<()> = async {
-            let mut panel = Panel::connect(&central, args.address.as_deref()).await?;
+            let mut panel = Panel::connect(central, args.address.as_deref()).await?;
             // Enter DIY mode, which displays uploaded images.
             panel.send(&[5, 0, 4, 1, 1]).await?;
             if let Some(b) = args.brightness {
