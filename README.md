@@ -14,8 +14,8 @@ with mode 0666:
 - 32 × 32 pixels × 3 bytes = **3072 bytes**
 - RGB888, row-major, origin top-left: pixel `(x, y)` is at offset `(y * 32 + x) * 3`
 
-The daemon reads the file up to `--fps` times per second and uploads it only
-when the contents changed. Two ways to write:
+The daemon checks the file every 5 ms and uploads it when the contents
+changed, at most `--fps` times per second. Two ways to write:
 
 - **mmap / write in place** — simplest; a frame caught mid-write is corrected
   on the next tick.

@@ -315,7 +315,9 @@ def main():
     p.add_argument("--list", action="store_true", help="list animations and exit")
     p.add_argument("--framebuffer", default="/dev/shm/billboard.rgb",
                    help="framebuffer path (default: %(default)s)")
-    p.add_argument("--fps", type=int, default=20, help="frames per second (default: %(default)s)")
+    p.add_argument("--fps", type=int,
+                   help="frames per second (default: 12 on the panel, which is about"
+                        " what BLE sustains for busy frames; 20 for --gif)")
     p.add_argument("--duration", type=float, default=6,
                    help="seconds per animation (default: %(default)s)")
     p.add_argument("--fade", type=float, default=0.75,
@@ -335,6 +337,8 @@ def main():
     unknown = [n for n in names if n not in ANIMATIONS]
     if unknown:
         p.error(f"unknown animation(s): {', '.join(unknown)} (see --list)")
+    if args.fps is None:
+        args.fps = 20 if args.gif else 12
     if args.fps < 1 or args.duration <= 0:
         p.error("--fps and --duration must be positive")
 

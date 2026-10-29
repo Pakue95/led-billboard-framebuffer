@@ -12,7 +12,7 @@ use btleplug::api::{Central, Characteristic, Manager as _, Peripheral as _, Scan
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use clap::{Parser, Subcommand};
 use futures::{FutureExt, Stream, StreamExt};
-use tokio::time::{sleep, timeout, Instant};
+use tokio::time::{sleep, sleep_until, timeout, Instant};
 use uuid::Uuid;
 
 const WRITE_UUID: Uuid = Uuid::from_u128(0x0000fa02_0000_1000_8000_00805f9b34fb);
@@ -21,6 +21,12 @@ const NOTIFY_UUID: Uuid = Uuid::from_u128(0x0000fa03_0000_1000_8000_00805f9b34fb
 const NAME_PREFIXES: &[&str] = &["IDM-", "LED_BLE_"];
 /// Images are uploaded in chunks of at most this many PNG bytes.
 const IMAGE_CHUNK: usize = 4096;
+/// How often the framebuffer is checked for changes. Much shorter than a
+/// frame, so new frames go out promptly instead of beating against the
+/// writer's own frame clock.
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
+/// How often an idle daemon checks that the panel is still connected.
+const LINK_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Parser)]
 #[command(version, about)]
@@ -304,10 +310,16 @@ async fn serve(central: &Adapter, args: &RunArgs, len: usize) -> Result<()> {
             }
             let mut last: Option<Vec<u8>> = None;
             let (mut sent, mut report_at) = (0u32, Instant::now());
+            let (mut next_upload, mut link_checked) = (Instant::now(), Instant::now());
             loop {
-                let started = Instant::now();
                 let frame = read_framebuffer(&args.framebuffer, len)?;
                 if last.as_ref() != Some(&frame) {
+                    if Instant::now() < next_upload {
+                        // Rate limit; re-read afterwards to send the newest frame.
+                        sleep_until(next_upload).await;
+                        continue;
+                    }
+                    next_upload = Instant::now() + frame_time;
                     let png = encode_png(&rotate(&frame, args.size as usize, args.rotate), args.size)?;
                     panel.show_png(&png).await?;
                     last = Some(frame);
@@ -317,10 +329,13 @@ async fn serve(central: &Adapter, args: &RunArgs, len: usize) -> Result<()> {
                         eprintln!("{sent} frames in {secs:.0}s ({:.1} fps)", f64::from(sent) / secs);
                         (sent, report_at) = (0, Instant::now());
                     }
-                } else if !panel.is_connected().await {
-                    bail!("panel disconnected");
+                } else if link_checked.elapsed() >= LINK_CHECK_INTERVAL {
+                    if !panel.is_connected().await {
+                        bail!("panel disconnected");
+                    }
+                    link_checked = Instant::now();
                 }
-                sleep(frame_time.saturating_sub(started.elapsed())).await;
+                sleep(POLL_INTERVAL).await;
             }
         }
         .await;
